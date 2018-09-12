@@ -1,93 +1,82 @@
 #!/usr/bin/env python3
 
+import argparse
+import logging
+import os
+import sys
+
+import json
 import requests
 from bs4 import BeautifulSoup
 
-import datetime
-import time
-import sys
-import os
-
-
-def ParseAd(html):  # Parses ad html trees and sorts relevant data into a dictionary
+def parse_ad(html): # Parses ad html trees and sorts relevant data into a dictionary
     ad_info = {}
-    
+
     #description = html.find('div', {"class": "description"}).text.strip()
     #description = description.replace(html.find('div', {"class": "details"}).text.strip(), '')
     #print(description)
     try:
         ad_info["Title"] = html.find('a', {"class": "title"}).text.strip()
     except:
-        print('[Error] Unable to parse Title data.')
-        
+        logging.error('Unable to parse Title data.')
+
     try:
         ad_info["Image"] = str(html.find('img'))
     except:
-        print('[Error] Unable to parse Image data')
+        logging.error('Unable to parse Image data')
 
     try:
         ad_info["Url"] = 'http://www.kijiji.ca' + html.get("data-vip-url")
     except:
-        print('[Error] Unable to parse URL data.')
-        
+        logging.error('Unable to parse URL data.')
+
     try:
         ad_info["Details"] = html.find('div', {"class": "details"}).text.strip()
     except:
-        print('[Error] Unable to parse Details data.')   
-        
+        logging.error('Unable to parse Details data.')
+
     try:
         description = html.find('div', {"class": "description"}).text.strip()
         description = description.replace(ad_info["Details"], '')
         ad_info["Description"] = description
     except:
-        print('[Error] Unable to parse Description data.')    
+        logging.error('Unable to parse Description data.')
 
     try:
         ad_info["Date"] = html.find('span', {"class": "date-posted"}).text.strip()
     except:
-        print('[Error] Unable to parse Date data.')    
-    
+        logging.error('Unable to parse Date data.')
+
     try:
         location = html.find('div', {"class": "location"}).text.strip()
-        location = location.replace(ad_info["Date"], '')        
+        location = location.replace(ad_info["Date"], '')
         ad_info["Location"] = location
     except:
-        print('[Error] Unable to parse Location data.')
+        logging.error('Unable to parse Location data.')
 
     try:
         ad_info["Price"] = html.find('div', {"class": "price"}).text.strip()
     except:
-        print('[Error] Unable to parse Price data.')
+        logging.error('Unable to parse Price data.')
 
     return ad_info
 
 
 def WriteAds(ad_dict, filename):  # Writes ads from given dictionary to given file
-    #try:
-	file = open(filename, 'ab')
-	for ad_id in ad_dict:
-		file.write(ad_id.encode('utf-8'))
-		file.write((str(ad_dict[ad_id]) + "\n").encode('utf-8'))
-	file.close()
-    #except:
-        #print('[Error] Unable to write ad(s) to file.')
+    with open(filename, 'w+') as fh:
+        fh.write(json.dumps(ad_dict))
 
 
-def ReadAds(filename):  # Reads given file and creates a dict of ads in file
+def ReadAds(outfile):  # Reads given file and creates a dict of ads in file
     import ast
-    if not os.path.exists(filename):  # If the file doesn't exist, it makes it.
-        file = open(filename, 'w')
+    if not os.path.exists(outfile):  # If the file doesn't exist, it makes it.
+        file = open(outfile, 'w')
         file.close()
 
     ad_dict = {}
-    with open(filename, 'rb') as file:
-        for line in file:
-            if line.strip() != '':
-                index = line.find('{'.encode('utf-8'))
-                ad_id = line[:index].decode('utf-8')
-                dictionary = line[index:].decode('utf-8')
-                dictionary = ast.literal_eval(dictionary)
-                ad_dict[ad_id] = dictionary
+    with open(outfile, 'r') as fh:
+        ad_dict = json.loads(fh.read())
+
     return ad_dict
 
 
@@ -95,7 +84,7 @@ def MailAd(ad_dict, email_title):  # Sends an email with a link and info of new 
     import smtplib
     from email.mime.text import MIMEText
 
-    
+
     # Fill in the variables below with your info
     #------------------------------------------
     sender = 'sender@example.com'
@@ -126,7 +115,7 @@ def MailAd(ad_dict, email_title):  # Sends an email with a link and info of new 
     except:
         body +='<p>' +  ad_dict[ad_id]['Title'] + '<br />'
         body += ad_dict[ad_id]['Url'] + '<br /><br />' + '</p>'
-        print('[Error] Unable to create body for email message')
+        logging.error('Unable to create body for email message')
 
     body += '<p>This is an automated message, please do not reply to this message.</p>'
     msg = MIMEText(body, 'html')
@@ -138,47 +127,47 @@ def MailAd(ad_dict, email_title):  # Sends an email with a link and info of new 
         server = smtplib.SMTP_SSL(smtp_server, smtp_port)
         server.ehlo()
     except:
-        print('[Error] Unable to connect to email server.')
+        logging.error('Unable to connect to email server.')
     try:
         server.login(sender, passwd)
     except:
-        print('[Error] Unable to login to email server.')
+        logging.error('Unable to login to email server.')
     try:
         server.send_message(msg)
         server.quit()
-        print('[Okay] Email message successfully delivered.')
+        logging.info('Email message successfully delivered.')
     except:
-        print('[Error] Unable to send message.')
+        logging.error('Unable to send message.')
 
 
-def scrape(url, old_ad_dict, exclude_list, filename, skip_flag):  # Pulls page data from a given kijiji url and finds all ads on each page
+def scrape(url, old_ad_dict, exclude_list, filename, send_email):  # Pulls page data from a given kijiji url and finds all ads on each page
     # Initialize variables for loop
     email_title = None
     ad_dict = {}
     third_party_ad_ids = []
-    
-    while url: 
-    
+
+    while url:
+
         try:
             page = requests.get(url) # Get the html data from the URL
         except:
             print("[Error] Unable to load " + url)
             sys.exit(1)
-    
+
         soup = BeautifulSoup(page.content, "html.parser")
-        
+
         if not email_title: # If the email title doesnt exist pull it form the html data
             email_title = soup.find('div', {'class': 'message'}).find('strong').text.strip('"')
-            email_title = toUpper(email_title)
-            
+            email_title = to_upper(email_title)
+
         kijiji_ads = soup.find_all("div", {"class": "regular-ad"})  # Finds all ad trees in page html.
-        
+
         third_party_ads = soup.find_all("div", {"class": "third-party"}) # Find all third-party ads to skip them
         for ad in third_party_ads:
             third_party_ad_ids.append(ad['data-ad-id'])
-            
-    
-        exclude_list = toLower(exclude_list) # Make all words in the exclude list lower-case
+
+
+        exclude_list = to_lower(exclude_list) # Make all words in the exclude list lower-case
         #checklist = ['miata']
         for ad in kijiji_ads:  # Creates a dictionary of all ads with ad id being the keys.
             title = ad.find('a', {"class": "title"}).text.strip() # Get the ad title
@@ -186,24 +175,24 @@ def scrape(url, old_ad_dict, exclude_list, filename, skip_flag):  # Pulls page d
             if not [False for match in exclude_list if match in title.lower()]: # If any of the title words match the exclude list then skip
                 #if [True for match in checklist if match in title.lower()]:
                 if (ad_id not in old_ad_dict and ad_id not in third_party_ad_ids): # Skip third-party ads and ads already found
-                    print('[Okay] New ad found! Ad id: ' + ad_id)
-                    ad_dict[ad_id] = ParseAd(ad) # Parse data from ad
+                    logging.info('New ad found! Ad id: ' + ad_id)
+                    ad_dict[ad_id] = parse_ad(ad) # Parse data from ad
         url = soup.find('a', {'title' : 'Next'})
         if url:
             url = 'https://www.kijiji.ca' + url['href']
 
     if ad_dict != {}:  # If dict not emtpy, write ads to text file and send email.
         WriteAds(ad_dict, filename) # Save ads to file
-        if not skip_flag: # if skip flag is set do not send out email
+        if send_email:
             MailAd(ad_dict, email_title) # Send out email with new ads
-            
-def toLower(input_list): # Rturns a given list of words to lower-case words
+
+def to_lower(input_list): # Rturns a given list of words to lower-case words
     output_list = list()
     for word in input_list:
         output_list.append(word.lower())
     return output_list
 
-def toUpper(title): # Makes the first letter of every word upper-case
+def to_upper(title): # Makes the first letter of every word upper-case
     new_title = list()
     title = title.split()
     for word in title:
@@ -214,37 +203,55 @@ def toUpper(title): # Makes the first letter of every word upper-case
         new_title.append(new_word)
     return ' '.join(new_title)
 
-def main(): # Main function, handles command line arguments and calls other functions for parsing ads
-    args = sys.argv
-    if args[1] == '-h' or args[1] == '--help': # Print script usage help
-        print('Usage: Kijiji-Scraper.py URL [-f] [-e] [-s]\n')
-        print('Positional arguments:')
-        print(' URL\t\tUrl to scrape for ads\n')
-        print('Optional arguments:')
-        print(' -h, --help  show this help message and exit')
-        print(' -f\t\tfilename to store ads in (default name is the url)')
-        print(' -e\t\tword that will exclude an ad if its in the title (can be a single word or multiple words seperated by spaces')
-        print(' -s\t\tflag that causes the program to skip sending an email. Useful if you want to index ads but not be notified of them')
-    else:
-        url_to_scrape = args[1]
-        skip_flag = False
-        if '-f' in args:
-            filename = args.pop(args.index('-f') + 1)
-            filename = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
-            args.remove('-f')
-        else:
-            filename = os.path.join(os.path.dirname(os.path.abspath(__file__)), url_to_scrape)
-        if '-s' in args:
-            skip_flag = True
-            args.remove('-s')
-        if '-e' in args:
-            exclude_list = args[args.index('-e') + 1:]
-        else:
-            exclude_list = list()
-        
-    old_ad_dict = ReadAds(filename)
-    print("[Okay] Ad database succesfully loaded.")
-    scrape(url_to_scrape, old_ad_dict, exclude_list, filename, skip_flag)
+def main():
+    parser = argparse.ArgumentParser(description='Scrape ads from a Kijiji URL')
+    outfile_default = 'scraped_ads.json'
+    parser.add_argument(
+        '--url', '-u',
+        dest='url',
+        type=str,
+        required=True,
+        help='URL to scrape',
+    )
+    parser.add_argument(
+        '--outfile', '-f',
+        dest='outfile',
+        type=str,
+        default=outfile_default,
+        help='filename to store ads in (default name is {outfile_default})'
+    ),
+    parser.add_argument(
+        '--exclude', '-e',
+        dest='exclude_list',
+        nargs='*',
+        type=str,
+        default=[],
+        help='ads containing one of the strings in this list are excluded'
+    )
+    parser.add_argument(
+        '-send_email', '-s',
+        dest='send_email',
+        type=bool,
+        default=False,
+        help='Email the output to a hardcoded address in the script'
+    )
+    parser.add_argument(
+        '-v',
+        '--verbose',
+        help='',
+        dest='verbose',
+        action='store_true'
+    )
+            #filename = args.pop(args.index('-f') + 1)
+            #filename = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+            #args.remove('-f')
+    args = parser.parse_args()
+
+    old_ad_dict = ReadAds(args.outfile)
+    level = 'INFO' if args.verbose else 'ERROR'
+    logging.basicConfig(level=level)
+    logging.info('Ad database succesfully loaded.')
+    scrape(args.url, old_ad_dict, args.exclude_list, args.outfile, args.send_email)
 
 if __name__ == "__main__":
     main()
