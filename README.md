@@ -22,5 +22,5 @@ conda install beautifulsoup4
 ```
 import pandas as pd
 
-df = pd.read_json('bikes.json', orient='records')
+df = pd.read_json('bikes.json', orient='index')
 ```
